@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'screens/library_screen.dart';
+import 'theme/app_colors.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   runApp(const LiteratureReaderApp());
@@ -11,11 +13,16 @@ class LiteratureReaderApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Literature Reader',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: Colors.indigo),
-      home: const LibraryScreen(),
+    // Тема (светлая / сепия / тёмная) из макета Figma, экран — настоящая
+    // библиотека с загрузкой EPUB.
+    return ValueListenableBuilder<ReaderTheme>(
+      valueListenable: readerThemeNotifier,
+      builder: (context, readerTheme, _) => MaterialApp(
+        title: 'Literature Reader',
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(readerTheme),
+        home: const LibraryScreen(),
+      ),
     );
   }
 }
