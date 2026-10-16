@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'poc/epub_reader_page.dart';
+import 'screens/library_screen.dart';
 
 void main() {
   runApp(const LiteratureReaderApp());
@@ -15,7 +15,7 @@ class LiteratureReaderApp extends StatelessWidget {
       title: 'Literature Reader',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: Colors.indigo),
-      home: const EpubReaderPage(),
+      home: const LibraryScreen(),
     );
   }
 }
