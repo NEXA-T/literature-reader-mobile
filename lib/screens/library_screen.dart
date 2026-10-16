@@ -4,7 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/book.dart';
+import '../models/reading_progress.dart';
 import '../services/book_storage_service.dart';
+import '../services/reading_progress_service.dart';
+import 'reader_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -15,7 +18,9 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   final _storage = BookStorageService();
+  final _progressService = ReadingProgressService();
   List<Book> _books = [];
+  Map<String, ReadingProgress> _progress = {};
   String? _booksDirPath;
   bool _loading = true;
   bool _importing = false;
@@ -29,12 +34,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _load() async {
     final books = await _storage.loadBooks();
     final dir = await _storage.booksDir();
+    final progress = await _loadProgress(books);
     if (!mounted) return;
     setState(() {
       _books = books;
       _booksDirPath = dir.path;
+      _progress = progress;
       _loading = false;
     });
+  }
+
+  Future<Map<String, ReadingProgress>> _loadProgress(List<Book> books) async {
+    final result = <String, ReadingProgress>{};
+    for (final book in books) {
+      final progress = await _progressService.load(book.id);
+      if (progress != null) result[book.id] = progress;
+    }
+    return result;
+  }
+
+  /// AC 2.1: по нажатию на карточку открывается экран чтения
+  Future<void> _openBook(Book book) async {
+    final dirPath = _booksDirPath ?? (await _storage.booksDir()).path;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderScreen(
+          book: book,
+          filePath: p.join(dirPath, book.fileName),
+        ),
+      ),
+    );
+    // Обновляем процент прочитанного на карточках
+    final progress = await _loadProgress(_books);
+    if (mounted) setState(() => _progress = progress);
   }
 
   Future<void> _addBook() async {
@@ -106,7 +139,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
               : const Icon(Icons.menu_book, size: 36),
         ),
         title: Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Text(book.author),
+        subtitle: Text(
+          _progress[book.id] == null
+              ? book.author
+              : '${book.author} · прочитано '
+                    '${(_progress[book.id]!.percent * 100).round()}%',
+        ),
+        onTap: () => _openBook(book),
       ),
     );
   }
