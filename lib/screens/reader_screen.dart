@@ -12,6 +12,10 @@ import '../reader/epub_parser.dart';
 import '../reader/paginator.dart';
 import '../reader/selectable_paragraph.dart';
 import '../services/reading_progress_service.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../widgets/book_widgets.dart';
+import '../widgets/theme_menu_button.dart';
 
 /// Экран чтения (US-02): постраничный просмотр книги, сохранение позиции,
 /// выделение текста с вызовом шторки «Объяснить с AI» (US-03).
@@ -105,10 +109,10 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ---------------------------------------------------------------- разметка
 
-  TextStyle _textStyle(BuildContext context) => DefaultTextStyle.of(context)
-      .style
-      .merge(Theme.of(context).textTheme.bodyLarge)
-      .copyWith(fontSize: 18, height: 1.5);
+  /// Текст книги — Literata 18 / 160% из макета Figma.
+  /// Цвет берётся из текущей темы и на разбивку по страницам не влияет.
+  TextStyle _textStyle(BuildContext context) =>
+      AppText.bookBody.copyWith(color: context.colors.text);
 
   /// Пересчитывает страницы, если поменялся размер области или масштаб шрифта.
   /// Позиция в тексте при этом сохраняется (AC 2.1).
@@ -237,7 +241,18 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(chapterTitle, overflow: TextOverflow.ellipsis),
+        title: Text(
+          chapterTitle,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.bodyStrong.copyWith(color: context.colors.text),
+        ),
+        centerTitle: true,
+        actions: const [ThemeMenuButton(), SizedBox(width: 4)],
+        // AC 2.3: прогресс вверху, под названием главы (как в макете)
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(38),
+          child: _buildProgressBar(context),
+        ),
       ),
       body: FutureBuilder<_ReaderData>(
         future: _data,
@@ -302,8 +317,6 @@ class _ReaderScreenState extends State<ReaderScreen>
             },
           ),
         ),
-        // Всегда в дереве, чтобы высота области текста не менялась
-        _buildProgressBar(context),
       ],
     );
   }
@@ -341,30 +354,32 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// AC 2.3: индикатор прогресса
+  /// AC 2.3: индикатор прогресса — страницы и процент прочитанного
   Widget _buildProgressBar(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.colors;
     final total = _pages.isEmpty ? 1 : _pages.length;
     final page = _pages.isEmpty ? 0 : _currentPage + 1;
     final percent = (page / total * 100).round();
+    final captionStyle = AppText.caption.copyWith(color: c.textSecondary);
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            LinearProgressIndicator(value: page / total, minHeight: 2),
-            const SizedBox(height: 6),
-            Text(
-              'Стр. $page из $total · $percent%',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ReadingProgressBar(value: page / total),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                _pages.isEmpty ? ' ' : 'стр. $page из $total',
+                style: captionStyle,
               ),
-            ),
-          ],
-        ),
+              Text(_pages.isEmpty ? '' : '$percent%', style: captionStyle),
+            ],
+          ),
+        ],
       ),
     );
   }
