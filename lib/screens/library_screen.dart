@@ -7,6 +7,10 @@ import '../models/book.dart';
 import '../models/reading_progress.dart';
 import '../services/book_storage_service.dart';
 import '../services/reading_progress_service.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_theme.dart';
+import '../widgets/book_widgets.dart';
+import '../widgets/theme_menu_button.dart';
 import 'reader_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
@@ -96,56 +100,143 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  /// Книга, которую читали последней, — для блока «Продолжить чтение».
+  Book? get _lastRead {
+    Book? best;
+    DateTime? bestTime;
+    for (final book in _books) {
+      final t = _progress[book.id]?.updatedAt;
+      if (t != null && (bestTime == null || t.isAfter(bestTime))) {
+        best = book;
+        bestTime = t;
+      }
+    }
+    return best;
+  }
+
+  ImageProvider? _coverOf(Book book) {
+    final dir = _booksDirPath;
+    final name = book.coverFileName;
+    if (dir == null || name == null) return null;
+    return FileImage(File(p.join(dir, name)));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final lastRead = _lastRead;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Библиотека')),
+      appBar: AppBar(
+        title: const Text('Моя библиотека'),
+        actions: const [ThemeMenuButton(), SizedBox(width: 4)],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _addBook,
         icon: _importing
-            ? const SizedBox(
+            ? SizedBox(
                 width: 20,
                 height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: context.colors.onAccent,
+                ),
               )
-            : const Icon(Icons.add),
+            : const Icon(Icons.add_rounded),
         label: const Text('Добавить книгу'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _books.isEmpty
-          ? const Center(child: Text('Библиотека пуста. Добавьте .epub-файл'))
-          : ListView.builder(
-              padding: const EdgeInsets.only(bottom: 88),
-              itemCount: _books.length,
-              itemBuilder: (context, i) => _buildBookCard(_books[i]),
+          ? const _EmptyLibrary()
+          : CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (lastRead != null) ...[
+                          const _SectionTitle('Продолжить чтение'),
+                          const SizedBox(height: 10),
+                          ContinueReadingCard(
+                            title: lastRead.title,
+                            author: lastRead.author,
+                            progress: _progress[lastRead.id]?.percent,
+                            cover: _coverOf(lastRead),
+                            onTap: () => _openBook(lastRead),
+                          ),
+                          const SizedBox(height: 28),
+                        ],
+                        _SectionTitle('Все книги · ${_books.length}'),
+                        const SizedBox(height: 4),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverList.separated(
+                  itemCount: _books.length,
+                  itemBuilder: (context, i) {
+                    final book = _books[i];
+                    return BookListTile(
+                      title: book.title,
+                      author: book.author,
+                      progress: _progress[book.id]?.percent,
+                      cover: _coverOf(book),
+                      onTap: () => _openBook(book),
+                    );
+                  },
+                  separatorBuilder: (_, _) =>
+                      const Divider(indent: 90, endIndent: 20),
+                ),
+                // Отступ, чтобы последняя книга не пряталась под кнопкой.
+                const SliverToBoxAdapter(child: SizedBox(height: 96)),
+              ],
             ),
     );
   }
+}
 
-  Widget _buildBookCard(Book book) {
-    final coverPath = book.coverFileName != null && _booksDirPath != null
-        ? p.join(_booksDirPath!, book.coverFileName!)
-        : null;
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle(this.text);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: ListTile(
-        leading: SizedBox(
-          width: 40,
-          height: 56,
-          child: coverPath != null
-              ? Image.file(File(coverPath), fit: BoxFit.cover)
-              : const Icon(Icons.menu_book, size: 36),
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.toUpperCase(),
+      style: AppText.label.copyWith(color: context.colors.textSecondary),
+    );
+  }
+}
+
+class _EmptyLibrary extends StatelessWidget {
+  const _EmptyLibrary();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.auto_stories_outlined, size: 56, color: c.accent),
+            const SizedBox(height: 16),
+            Text(
+              'Здесь пока пусто',
+              style: AppText.title.copyWith(color: c.text),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Загрузите первую книгу в формате .epub',
+              textAlign: TextAlign.center,
+              style: AppText.body.copyWith(color: c.textSecondary),
+            ),
+          ],
         ),
-        title: Text(book.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          _progress[book.id] == null
-              ? book.author
-              : '${book.author} · прочитано '
-                    '${(_progress[book.id]!.percent * 100).round()}%',
-        ),
-        onTap: () => _openBook(book),
       ),
     );
   }

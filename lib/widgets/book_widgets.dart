@@ -1,27 +1,97 @@
 import 'package:flutter/material.dart';
 
-import '../mock/mock_books.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+
+/// Цвета «тканевых» обложек для книг без картинки в EPUB.
+const _coverPalette = [
+  Color(0xFF4F7A6C),
+  Color(0xFF9A6A55),
+  Color(0xFF5A6F93),
+  Color(0xFF7A5A7E),
+  Color(0xFF3E4F55),
+  Color(0xFFA4863F),
+];
+
+/// Один и тот же цвет для одного и того же названия.
+Color coverColorFor(String title) {
+  var hash = 0;
+  for (final unit in title.codeUnits) {
+    hash = (hash * 31 + unit) & 0x7fffffff;
+  }
+  return _coverPalette[hash % _coverPalette.length];
+}
+
+/// Подпись прогресса: `null` или 0 — книга ещё не открывалась.
+String progressLabel(double? p) {
+  if (p == null || p <= 0) return 'Не начата';
+  if (p >= 1) return 'Прочитана';
+  return '${(p * 100).round()}%';
+}
 
 /// Обложка книги. Если в EPUB нет картинки — рисуем аккуратную
 /// «тканевую» обложку с названием, чтобы список не выглядел пустым.
 class BookCover extends StatelessWidget {
   const BookCover({
     super.key,
-    required this.book,
+    required this.title,
+    this.cover,
     this.width = 56,
     this.height = 80,
   });
 
-  final LibraryBookPreview book;
+  final String title;
+  final ImageProvider? cover;
   final double width;
   final double height;
 
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(6);
-    final cover = book.cover;
+    final color = coverColorFor(title);
+    final image = cover;
+
+    final generated = DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [color, Color.lerp(color, Colors.black, 0.25)!],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // «Корешок» слева.
+          Positioned(
+            left: 4,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 1,
+              color: Colors.white.withValues(alpha: 0.25),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              width * 0.16,
+              height * 0.1,
+              width * 0.08,
+              height * 0.08,
+            ),
+            child: Text(
+              title,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.bookQuote.copyWith(
+                color: Colors.white,
+                fontSize: width / 6.2,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
 
     return Container(
       width: width,
@@ -38,51 +108,13 @@ class BookCover extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: cover != null
-            ? Image(image: cover, fit: BoxFit.cover)
-            : DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      book.coverColor,
-                      Color.lerp(book.coverColor, Colors.black, 0.25)!,
-                    ],
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    // «Корешок» слева.
-                    Positioned(
-                      left: 4,
-                      top: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 1,
-                        color: Colors.white.withValues(alpha: 0.25),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        width * 0.16,
-                        height * 0.1,
-                        width * 0.08,
-                        height * 0.08,
-                      ),
-                      child: Text(
-                        book.title,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.bookQuote.copyWith(
-                          color: Colors.white,
-                          fontSize: width / 6.2,
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+        child: image == null
+            ? generated
+            : Image(
+                image: image,
+                fit: BoxFit.cover,
+                // Битый файл обложки — показываем сгенерированную.
+                errorBuilder: (_, _, _) => generated,
               ),
       ),
     );
@@ -110,17 +142,21 @@ class ReadingProgressBar extends StatelessWidget {
   }
 }
 
-String progressLabel(double p) {
-  if (p <= 0) return 'Не начата';
-  if (p >= 1) return 'Прочитана';
-  return '${(p * 100).round()}%';
-}
-
 /// Крупная карточка «Продолжить чтение».
 class ContinueReadingCard extends StatelessWidget {
-  const ContinueReadingCard({super.key, required this.book, this.onTap});
+  const ContinueReadingCard({
+    super.key,
+    required this.title,
+    required this.author,
+    this.progress,
+    this.cover,
+    this.onTap,
+  });
 
-  final LibraryBookPreview book;
+  final String title;
+  final String author;
+  final double? progress;
+  final ImageProvider? cover;
   final VoidCallback? onTap;
 
   @override
@@ -140,14 +176,14 @@ class ContinueReadingCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              BookCover(book: book, width: 72, height: 104),
+              BookCover(title: title, cover: cover, width: 72, height: 104),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      book.title,
+                      title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: AppText.bodyStrong.copyWith(
@@ -158,16 +194,18 @@ class ContinueReadingCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      book.author,
+                      author,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: AppText.body.copyWith(color: c.textSecondary),
                     ),
                     const SizedBox(height: 14),
-                    ReadingProgressBar(value: book.progress),
+                    ReadingProgressBar(value: progress ?? 0),
                     const SizedBox(height: 6),
                     Row(
                       children: [
                         Text(
-                          progressLabel(book.progress),
+                          progressLabel(progress),
                           style: AppText.caption.copyWith(
                             color: c.textSecondary,
                           ),
@@ -199,9 +237,19 @@ class ContinueReadingCard extends StatelessWidget {
 
 /// Строка книги в общем списке.
 class BookListTile extends StatelessWidget {
-  const BookListTile({super.key, required this.book, this.onTap});
+  const BookListTile({
+    super.key,
+    required this.title,
+    required this.author,
+    this.progress,
+    this.cover,
+    this.onTap,
+  });
 
-  final LibraryBookPreview book;
+  final String title;
+  final String author;
+  final double? progress;
+  final ImageProvider? cover;
   final VoidCallback? onTap;
 
   @override
@@ -213,20 +261,22 @@ class BookListTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
           children: [
-            BookCover(book: book),
+            BookCover(title: title, cover: cover),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    book.title,
+                    title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: AppText.bodyStrong.copyWith(color: c.text),
                   ),
                   Text(
-                    book.author,
+                    author,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: AppText.caption.copyWith(
                       color: c.textSecondary,
                       fontSize: 13,
@@ -235,12 +285,14 @@ class BookListTile extends StatelessWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      Expanded(child: ReadingProgressBar(value: book.progress)),
+                      Expanded(
+                        child: ReadingProgressBar(value: progress ?? 0),
+                      ),
                       const SizedBox(width: 10),
                       SizedBox(
                         width: 68,
                         child: Text(
-                          progressLabel(book.progress),
+                          progressLabel(progress),
                           textAlign: TextAlign.right,
                           style: AppText.caption.copyWith(
                             color: c.textSecondary,
