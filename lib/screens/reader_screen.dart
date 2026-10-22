@@ -102,6 +102,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         chapterIndex: f.chapterIndex,
         paragraphIndex: f.paragraphIndex,
         charOffset: f.start,
+        currentPage: page + 1,
+        totalPages: _pages.length,
         percent: (page + 1) / _pages.length,
         updatedAt: DateTime.now(),
       ),
@@ -221,7 +223,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ---------------------------------------------------------------- AI
 
-  void _explain(String selected, String paragraph) {
+  void _explain(String selected, String paragraph, int chapterIndex) {
     final text = selected.trim();
     switch (checkSelection(text)) {
       case SelectionCheck.empty:
@@ -241,6 +243,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         selectedText: text,
         context: trimContext(paragraph, text),
         bookTitle: widget.book.title,
+        bookId: widget.book.id,
+        chapterIndex: chapterIndex,
       ),
     );
   }
@@ -357,7 +361,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                     text: paragraph.substring(f.start, f.end),
                     style: style,
                     onSelectionActive: (active) => _selectionActive = active,
-                    onExplain: (selected) => _explain(selected, paragraph),
+                    onExplain: (selected) =>
+                        _explain(selected, paragraph, page.chapterIndex),
                   );
                 },
               ),

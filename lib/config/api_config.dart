@@ -27,6 +27,11 @@ class ApiConfig {
 
   static const explainPath = '/api/v1/explain';
 
+  /// Генерация иллюстрации по image_prompt (задача #15). Картинка тяжёлая,
+  /// поэтому ждём дольше, чем текстовый разбор.
+  static const generateImagePath = '/api/v1/generate-image';
+  static const imageReceiveTimeout = Duration(seconds: 60);
+
   /// Сколько ждать ответа сервера (задача #13: ReceiveTimeout = 10 с).
   static const receiveTimeout = Duration(seconds: 10);
   static const connectTimeout = Duration(seconds: 10);
