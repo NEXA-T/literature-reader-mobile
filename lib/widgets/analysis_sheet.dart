@@ -1,101 +1,89 @@
 import 'package:flutter/material.dart';
 
+import '../debug/debug_analysis.dart';
 import '../models/analysis_result.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import 'analysis_sheet_controller.dart';
 import 'shimmer.dart';
 
-/// Состояние шторки AI-разбора (компонент «BottomSheet / Разбор» в Figma,
-/// свойство State: Normal / Loading / Error).
-sealed class AnalysisSheetState {
-  const AnalysisSheetState();
-}
+export 'analysis_sheet_controller.dart';
 
-class AnalysisLoading extends AnalysisSheetState {
-  const AnalysisLoading();
-}
-
-class AnalysisLoaded extends AnalysisSheetState {
-  const AnalysisLoaded(this.result);
-  final AnalysisResult result;
-}
-
-class AnalysisFailed extends AnalysisSheetState {
-  const AnalysisFailed(this.kind);
-  final AnalysisFailureKind kind;
-}
-
-/// Открывает шторку разбора и сам управляет её состояниями:
-/// загрузка → результат или ошибка → «Повторить» → снова загрузка.
+/// Открывает шторку AI-разбора поверх экрана чтения (задача #12).
 ///
-/// [fetch] — функция запроса к бэкенду. Сейчас это заглушка
-/// MockAnalysisService, позже — настоящий API-клиент.
+/// [fragment] — выделенный текст, он показывается в шапке в кавычках.
+/// [fetch] — запрос к бэкенду (см. [AnalysisFetcher]). Шторка сама
+/// переключает состояния: Loading → Success или Error → «Повторить».
 ///
-/// Шторка закрывается свайпом вниз, тапом вне её или крестиком (AC 4.6);
-/// экран под ней не пересоздаётся, поэтому позиция чтения не теряется.
+/// Закрывается свайпом вниз, тапом по затемнению или крестиком ✕;
+/// экран чтения под ней не пересоздаётся, позиция не теряется.
 Future<void> showAnalysisSheet(
   BuildContext context, {
   required String fragment,
-  required Future<AnalysisResult> Function() fetch,
+  required AnalysisFetcher fetch,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: context.colors.surface,
+    // Полупрозрачное затемнение текста книги под шторкой.
     barrierColor: Colors.black.withValues(alpha: 0.32),
     elevation: 0,
+    // Скругление верхних углов 24dp — как в макете.
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     clipBehavior: Clip.antiAlias,
-    builder: (_) => _AnalysisSheetHost(fragment: fragment, fetch: fetch),
+    // Плавный выезд снизу вверх.
+    sheetAnimationStyle: AnimationStyle(
+      duration: const Duration(milliseconds: 320),
+      reverseDuration: const Duration(milliseconds: 220),
+    ),
+    builder: (_) => _AnalysisSheetHost(
+      fragment: fragment,
+      fetch: applyDebugAnalysisMode(fetch),
+    ),
   );
 }
 
+/// Создаёт контроллер на время жизни шторки и отправляет первый запрос.
 class _AnalysisSheetHost extends StatefulWidget {
   const _AnalysisSheetHost({required this.fragment, required this.fetch});
 
   final String fragment;
-  final Future<AnalysisResult> Function() fetch;
+  final AnalysisFetcher fetch;
 
   @override
   State<_AnalysisSheetHost> createState() => _AnalysisSheetHostState();
 }
 
 class _AnalysisSheetHostState extends State<_AnalysisSheetHost> {
-  AnalysisSheetState _state = const AnalysisLoading();
-  int _requestId = 0;
+  late final AnalysisSheetController _controller =
+      AnalysisSheetController(fetch: widget.fetch);
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _controller.load();
   }
 
-  Future<void> _load() async {
-    final id = ++_requestId;
-    setState(() => _state = const AnalysisLoading());
-    AnalysisSheetState next;
-    try {
-      next = AnalysisLoaded(await widget.fetch());
-    } on AnalysisException catch (e) {
-      next = AnalysisFailed(e.kind);
-    } catch (_) {
-      next = const AnalysisFailed(AnalysisFailureKind.server);
-    }
-    // Шторку могли закрыть или нажать «Повторить» ещё раз, пока шёл запрос.
-    if (!mounted || id != _requestId) return;
-    setState(() => _state = next);
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnalysisSheetView(
-      fragment: widget.fragment,
-      state: _state,
-      onRetry: _load,
-      onClose: () => Navigator.of(context).maybePop(),
+    return ValueListenableBuilder<AnalysisSheetState>(
+      valueListenable: _controller,
+      builder: (context, state, _) => AnalysisSheetView(
+        fragment: widget.fragment,
+        state: state,
+        onRetry: _controller.retry,
+        onClose: () => Navigator.of(context).maybePop(),
+      ),
     );
   }
 }
@@ -126,9 +114,8 @@ class AnalysisSheetView extends StatelessWidget {
       AnalysisLoading() => const _LoadingContent(key: ValueKey('loading')),
       AnalysisLoaded(:final result) =>
         _ResultContent(key: const ValueKey('result'), result: result),
-      AnalysisFailed(:final kind) => _ErrorContent(
-          key: ValueKey('error-$kind'),
-          kind: kind,
+      AnalysisFailed() => _ErrorContent(
+          key: const ValueKey('error'),
           onRetry: onRetry,
         ),
     };
@@ -162,7 +149,7 @@ class AnalysisSheetView extends StatelessWidget {
                   child: Padding(
                     padding: const EdgeInsets.only(top: 10),
                     child: Text(
-                      '«$fragment»',
+                      '«${fragment.trim()}»',
                       style: AppText.bookQuote.copyWith(color: c.text),
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
@@ -430,28 +417,18 @@ class _LoadingContent extends StatelessWidget {
 // ───────────────────────── Error ─────────────────────────
 
 class _ErrorContent extends StatelessWidget {
-  const _ErrorContent({super.key, required this.kind, required this.onRetry});
+  const _ErrorContent({super.key, required this.onRetry});
 
-  final AnalysisFailureKind kind;
   final VoidCallback onRetry;
+
+  // Тексты из задачи #12 и макета Figma (BottomSheet / Разбор, State=Error).
+  static const title = 'Не удалось получить разбор';
+  static const message =
+      'Проверьте подключение к интернету и попробуйте ещё раз';
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final (icon, title, message) = switch (kind) {
-      AnalysisFailureKind.offline => (
-          Icons.wifi_off_rounded,
-          'Нет подключения к интернету',
-          'Разбор работает только онлайн. Подключитесь к сети '
-              'и попробуйте ещё раз',
-        ),
-      AnalysisFailureKind.server => (
-          Icons.cloud_off_rounded,
-          'Не удалось получить разбор',
-          'Сервер или нейросеть не ответили вовремя. '
-              'Попробуйте ещё раз через пару секунд',
-        ),
-    };
 
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -461,7 +438,8 @@ class _ErrorContent extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(color: c.errorBg, shape: BoxShape.circle),
-            child: Icon(icon, size: 26, color: c.error),
+            // Розовый круг с иконкой сети — как в макете.
+            child: Icon(Icons.wifi_off_rounded, size: 26, color: c.error),
           ),
           const SizedBox(height: 12),
           Text(
