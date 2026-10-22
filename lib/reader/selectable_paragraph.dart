@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ai_explain/selection_validation.dart';
+
 /// Кусок абзаца с выделением по долгому нажатию (AC 3.1) и пунктом
 /// «Объяснить с AI» в контекстном меню (AC 3.2).
 class SelectableParagraph extends StatelessWidget {
@@ -33,7 +35,9 @@ class SelectableParagraph extends StatelessWidget {
         return AdaptiveTextSelectionToolbar.buttonItems(
           anchors: editableTextState.contextMenuAnchors,
           buttonItems: [
-            if (selected.isNotEmpty)
+            // Пустое выделение (одни пробелы) — кнопки нет. Слишком длинное
+            // кнопку показывает, а экран чтения выводит подсказку.
+            if (checkSelection(selected) != SelectionCheck.empty)
               ContextMenuButtonItem(
                 label: 'Объяснить с AI',
                 onPressed: () {
