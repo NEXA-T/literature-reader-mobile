@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../ai_explain/ai_explain_request.dart';
 import '../ai_explain/ai_explain_sheet.dart';
+import '../ai_explain/selection_validation.dart';
 import '../models/book.dart';
 import '../models/reading_progress.dart';
 import '../reader/epub_parser.dart';
@@ -221,11 +222,24 @@ class _ReaderScreenState extends State<ReaderScreen>
   // ---------------------------------------------------------------- AI
 
   void _explain(String selected, String paragraph) {
+    final text = selected.trim();
+    switch (checkSelection(text)) {
+      case SelectionCheck.empty:
+        return;
+      case SelectionCheck.tooLong:
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text(selectionTooLongMessage)));
+        return;
+      case SelectionCheck.ok:
+        break;
+    }
+
     showAiExplainSheet(
       context,
       AiExplainRequest(
-        selectedText: selected,
-        context: paragraph,
+        selectedText: text,
+        context: trimContext(paragraph, text),
         bookTitle: widget.book.title,
       ),
     );
