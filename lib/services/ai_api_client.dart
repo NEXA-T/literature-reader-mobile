@@ -1,11 +1,14 @@
+import 'dart:convert';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 
 import '../config/api_config.dart';
 import '../models/analysis_result.dart';
 
-/// Клиент бэкенда: POST /api/v1/explain.
+/// Клиент бэкенда: POST /api/v1/explain и POST /api/v1/generate-image.
 ///
 /// Договорённость со шторкой (lib/widgets/analysis_sheet.dart):
 /// при успехе возвращаем [AnalysisResult], при любой ошибке бросаем
@@ -92,6 +95,69 @@ class AiApiClient {
       throw const AnalysisException(AnalysisFailureKind.server);
     }
     return result;
+  }
+
+  /// Генерация иллюстрации: POST /api/v1/generate-image (задача #15).
+  ///
+  /// Вызывается отдельно от [analyze], уже после показа текста разбора,
+  /// поэтому тяжёлая картинка не задерживает шторку.
+  /// Возвращает [ImageProvider] — его можно сразу отдать в Image(image: ...).
+  /// При ошибке бросает [AnalysisException], как и [analyze].
+  ///
+  /// Формат ответа бэкенд ещё не зафиксировал, поэтому понимаем три варианта:
+  /// сама картинка (Content-Type: image/*), JSON со ссылкой
+  /// (`image_url` / `url`) или JSON с base64 (`image_base64` / `image`).
+  Future<ImageProvider> generateImage(String imagePrompt) async {
+    if (!await _hasNetwork()) {
+      throw const AnalysisException(AnalysisFailureKind.offline);
+    }
+
+    final Response<List<int>> response;
+    try {
+      response = await _dio.post<List<int>>(
+        ApiConfig.generateImagePath,
+        data: {'image_prompt': imagePrompt},
+        options: Options(
+          responseType: ResponseType.bytes,
+          receiveTimeout: ApiConfig.imageReceiveTimeout,
+        ),
+      );
+    } on DioException catch (e) {
+      debugPrint(
+        '[AI API] ошибка генерации картинки: ${e.type} ${e.message ?? ''}',
+      );
+      throw AnalysisException(_failureKind(e));
+    }
+    debugPrint(
+      '[AI API] картинка: ${response.statusCode} ${response.statusMessage ?? ''}',
+    );
+
+    final bytes = Uint8List.fromList(response.data ?? const []);
+    final contentType = response.headers.value(Headers.contentTypeHeader) ?? '';
+    if (contentType.startsWith('image/')) return MemoryImage(bytes);
+
+    try {
+      final json = jsonDecode(utf8.decode(bytes));
+      if (json is Map<String, dynamic>) {
+        final url = (json['image_url'] ?? json['url']) as String?;
+        if (url != null && url.isNotEmpty) {
+          return NetworkImage(
+            Uri.parse(ApiConfig.baseUrl).resolve(url).toString(),
+          );
+        }
+        var b64 = (json['image_base64'] ?? json['image']) as String?;
+        if (b64 != null && b64.isNotEmpty) {
+          final comma = b64.indexOf(',');
+          if (b64.startsWith('data:') && comma != -1) {
+            b64 = b64.substring(comma + 1);
+          }
+          return MemoryImage(base64Decode(b64));
+        }
+      }
+    } catch (e) {
+      debugPrint('[AI API] не удалось разобрать ответ с картинкой: $e');
+    }
+    throw const AnalysisException(AnalysisFailureKind.server);
   }
 
   Future<bool> _hasNetwork() async {
