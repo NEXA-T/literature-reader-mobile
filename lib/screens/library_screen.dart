@@ -29,6 +29,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _loading = true;
   bool _importing = false;
 
+  /// Вид полки: сетка обложек (как Apple Books) или список.
+  bool _grid = false;
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +124,39 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return FileImage(File(p.join(dir, name)));
   }
 
+  /// Сетка обложек: число колонок подстраивается под ширину экрана.
+  Widget _buildGrid() {
+    const spacing = 14.0;
+    const minCardWidth = 104.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = ((width + spacing) / (minCardWidth + spacing))
+            .floor()
+            .clamp(2, 6);
+        final cardWidth =
+            ((width - spacing * (columns - 1)) / columns).floorToDouble();
+        return Wrap(
+          spacing: spacing,
+          runSpacing: 22,
+          children: [
+            for (final book in _books)
+              SizedBox(
+                width: cardWidth,
+                child: BookGridCard(
+                  title: book.title,
+                  author: book.author,
+                  progress: _progress[book.id]?.percent,
+                  cover: _coverOf(book),
+                  onTap: () => _openBook(book),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final lastRead = _lastRead;
@@ -128,7 +164,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Моя библиотека'),
-        actions: const [ThemeMenuButton(), SizedBox(width: 4)],
+        actions: [
+          if (_books.isNotEmpty)
+            IconButton(
+              tooltip: _grid ? 'Показать списком' : 'Показать сеткой',
+              onPressed: () => setState(() => _grid = !_grid),
+              icon: Icon(
+                _grid ? Icons.view_agenda_outlined : Icons.grid_view_rounded,
+                color: context.colors.text,
+              ),
+            ),
+          const ThemeMenuButton(),
+          const SizedBox(width: 4),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _addBook,
@@ -169,26 +217,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           const SizedBox(height: 28),
                         ],
                         _SectionTitle('Все книги · ${_books.length}'),
-                        const SizedBox(height: 4),
+                        SizedBox(height: _grid ? 12 : 4),
                       ],
                     ),
                   ),
                 ),
-                SliverList.separated(
-                  itemCount: _books.length,
-                  itemBuilder: (context, i) {
-                    final book = _books[i];
-                    return BookListTile(
-                      title: book.title,
-                      author: book.author,
-                      progress: _progress[book.id]?.percent,
-                      cover: _coverOf(book),
-                      onTap: () => _openBook(book),
-                    );
-                  },
-                  separatorBuilder: (_, _) =>
-                      const Divider(indent: 90, endIndent: 20),
-                ),
+                if (_grid)
+                  SliverPadding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    sliver: SliverToBoxAdapter(child: _buildGrid()),
+                  )
+                else
+                  SliverList.separated(
+                    itemCount: _books.length,
+                    itemBuilder: (context, i) {
+                      final book = _books[i];
+                      return BookListTile(
+                        title: book.title,
+                        author: book.author,
+                        progress: _progress[book.id]?.percent,
+                        cover: _coverOf(book),
+                        onTap: () => _openBook(book),
+                      );
+                    },
+                    separatorBuilder: (_, _) =>
+                        const Divider(indent: 90, endIndent: 20),
+                  ),
                 // Отступ, чтобы последняя книга не пряталась под кнопкой.
                 const SliverToBoxAdapter(child: SizedBox(height: 96)),
               ],
@@ -225,13 +279,14 @@ class _EmptyLibrary extends StatelessWidget {
           children: [
             Icon(Icons.auto_stories_outlined, size: 56, color: c.accent),
             const SizedBox(height: 16),
+            // Текст из задачи #14.
             Text(
-              'Здесь пока пусто',
+              'Ваша библиотека пуста',
               style: AppText.title.copyWith(color: c.text),
             ),
             const SizedBox(height: 6),
             Text(
-              'Загрузите первую книгу в формате .epub',
+              'Нажмите +, чтобы добавить первую книгу в формате .epub',
               textAlign: TextAlign.center,
               style: AppText.body.copyWith(color: c.textSecondary),
             ),

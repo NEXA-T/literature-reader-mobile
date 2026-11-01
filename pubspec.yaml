@@ -67,6 +67,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/books/alice.epub
+    # Картинка-пример для отладки шторки (меню 🎨 → «Отладка · иллюстрация»)
+    - assets/debug/illustration_sample.jpg
 
   # Шрифты из макета Figma: Literata — текст книги, Inter — интерфейс (лицензия OFL)
   fonts:

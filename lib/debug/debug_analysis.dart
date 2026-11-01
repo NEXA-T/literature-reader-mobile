@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 
 import '../models/analysis_result.dart';
 import '../widgets/analysis_sheet_controller.dart';
+import '../widgets/illustration_view.dart';
 
 /// Отладочная подмена ответа AI — чтобы проверить и заснять все
 /// состояния шторки без бэкенда и без отключения интернета.
@@ -57,6 +59,50 @@ AnalysisFetcher applyDebugAnalysisMode(AnalysisFetcher fetch) {
       case DebugAnalysisMode.off:
         return AnalysisResult.fromJson(_withSlang);
     }
+  };
+}
+
+/// Отладочная подмена генерации иллюстрации — по тем же правилам,
+/// что и [DebugAnalysisMode]: только в `flutter run`.
+enum DebugIllustrationMode {
+  off('Как в приложении'),
+  sample('Пример картинки'),
+  failed('Ошибка генерации'),
+  failThenSample('Ошибка → «Повторить» → картинка');
+
+  const DebugIllustrationMode(this.label);
+
+  final String label;
+}
+
+final debugIllustrationMode = ValueNotifier<DebugIllustrationMode>(
+  DebugIllustrationMode.off,
+);
+
+/// Картинка-пример, лежит в assets/debug/. Это настоящая иллюстрация
+/// GigaChat к «dead as a door-nail» из бэкенда (docs/demo-assets/07_door_nail.jpg).
+const debugIllustrationAsset = 'assets/debug/illustration_sample.jpg';
+
+/// Задержка «генерации» в отладке — чтобы успеть увидеть шиммер.
+const _illustrationDelay = Duration(milliseconds: 2500);
+
+/// Работает, даже если настоящий загрузчик ещё не подключён (`null`),
+/// — так все состояния блока можно проверить заранее.
+IllustrationLoader? applyDebugIllustrationMode(IllustrationLoader? load) {
+  if (!kDebugMode) return load;
+  final mode = debugIllustrationMode.value;
+  if (mode == DebugIllustrationMode.off) return load;
+
+  var attempt = 0;
+  return (prompt) async {
+    attempt++;
+    await Future<void>.delayed(_illustrationDelay);
+    final fail = mode == DebugIllustrationMode.failed ||
+        (mode == DebugIllustrationMode.failThenSample && attempt == 1);
+    if (fail) {
+      throw const AnalysisException(AnalysisFailureKind.server);
+    }
+    return const AssetImage(debugIllustrationAsset);
   };
 }
 

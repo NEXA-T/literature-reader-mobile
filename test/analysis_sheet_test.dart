@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,17 +7,39 @@ import 'package:literature_reader/models/analysis_result.dart';
 import 'package:literature_reader/theme/app_colors.dart';
 import 'package:literature_reader/theme/app_theme.dart';
 import 'package:literature_reader/widgets/analysis_sheet.dart';
+import 'package:literature_reader/widgets/illustration_view.dart';
 import 'package:literature_reader/widgets/shimmer.dart';
 
 const _full = AnalysisResult(
   translation: 'мертвее мёртвого',
   contextMeaning: 'ирония рассказчика',
   slangOrEtymology: 'XIV век',
+  imagePrompt: 'an old wooden door with a bent nail',
 );
+
+/// Прозрачная картинка 1×1 — подменяет генерацию в тестах.
+final _pixel = MemoryImage(Uint8List.fromList(const [
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, //
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, //
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, //
+  0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0x63, 0x60, 0x60, 0x60, 0x60, //
+  0x00, 0x00, 0x00, 0x05, 0x00, 0x01, 0x7A, 0xA8, 0x57, 0x50, 0x00, 0x00, //
+  0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, //
+]));
+
+/// Загрузчик иллюстраций для тестов: мгновенно отдаёт картинку.
+Future<ImageProvider> _instantImage(String imagePrompt) async => _pixel;
 
 const _noSlang = AnalysisResult(
   translation: 'перевод',
   contextMeaning: 'смысл',
+  imagePrompt: 'a clerk signing a register',
+);
+
+const _noPrompt = AnalysisResult(
+  translation: 'перевод',
+  contextMeaning: 'смысл',
+  slangOrEtymology: 'сленг',
 );
 
 Widget _view(AnalysisSheetState state, {VoidCallback? onRetry}) {
@@ -26,6 +49,7 @@ Widget _view(AnalysisSheetState state, {VoidCallback? onRetry}) {
       body: AnalysisSheetView(
         fragment: 'as dead as a door-nail',
         state: state,
+        loadIllustration: _instantImage,
         onRetry: onRetry ?? () {},
         onClose: () {},
       ),
@@ -45,6 +69,7 @@ Widget _host(AnalysisFetcher fetch) {
               context,
               fragment: 'as dead as a door-nail',
               fetch: fetch,
+              loadIllustration: _instantImage,
             ),
             child: const Text('open'),
           ),
@@ -148,7 +173,7 @@ void main() {
       expect(find.text('ПЕРЕВОД'), findsOneWidget);
     });
 
-    testWidgets('Success: все блоки и плейсхолдер иллюстрации',
+    testWidgets('Success: все блоки и иллюстрация',
         (tester) async {
       await tester.pumpWidget(_view(const AnalysisLoaded(_full)));
       await tester.pumpAndSettle();
@@ -156,7 +181,7 @@ void main() {
       expect(find.text('СМЫСЛОВОЙ КОНТЕКСТ'), findsOneWidget);
       expect(find.text('ЭТИМОЛОГИЯ / СЛЕНГ'), findsOneWidget);
       expect(find.text('ИЛЛЮСТРАЦИЯ'), findsOneWidget);
-      expect(find.text('Здесь появится иллюстрация'), findsOneWidget);
+      expect(find.byType(IllustrationView), findsOneWidget);
     });
 
     testWidgets('slang_or_etymology = null: блока нет в дереве',
@@ -166,6 +191,32 @@ void main() {
       expect(find.text('ЭТИМОЛОГИЯ / СЛЕНГ'), findsNothing);
       expect(find.text('XIV век'), findsNothing);
       expect(find.text('ИЛЛЮСТРАЦИЯ'), findsOneWidget);
+    });
+
+    testWidgets('загрузчик не подключён: пунктирная заглушка', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: buildAppTheme(ReaderTheme.light),
+        home: Scaffold(
+          body: AnalysisSheetView(
+            fragment: 'as dead as a door-nail',
+            state: const AnalysisLoaded(_full),
+            onRetry: () {},
+            onClose: () {},
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(IllustrationPlaceholder), findsOneWidget);
+      expect(find.text('Здесь появится иллюстрация'), findsOneWidget);
+      expect(find.byType(IllustrationView), findsNothing);
+    });
+
+    testWidgets('image_prompt = null: блока иллюстрации нет', (tester) async {
+      await tester.pumpWidget(_view(const AnalysisLoaded(_noPrompt)));
+      await tester.pumpAndSettle();
+      expect(find.text('ИЛЛЮСТРАЦИЯ'), findsNothing);
+      expect(find.byType(IllustrationView), findsNothing);
+      expect(find.text('ЭТИМОЛОГИЯ / СЛЕНГ'), findsOneWidget);
     });
 
     testWidgets('Error: текст из задачи и «Повторить» вызывает коллбэк',

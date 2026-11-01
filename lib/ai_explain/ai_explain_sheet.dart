@@ -28,6 +28,9 @@ Future<void> showAiExplainSheet(
     context,
     fragment: request.selectedText,
     fetch: () => _fetchWithCache(request),
+    // Блок иллюстрации (#14): картинка по image_prompt грузится уже после
+    // показа текста разбора.
+    loadIllustration: loadIllustration,
   );
 }
 
@@ -75,7 +78,7 @@ Future<AnalysisResult> _fetchWithCache(AiExplainRequest request) async {
 }
 
 /// Загрузка иллюстрации по image_prompt — для блока картинки в шторке (#14).
-/// Вероника передаст её в виджет иллюстрации; шторка вызывает её уже после
+/// Передаётся в шторку как `loadIllustration`; шторка вызывает её уже после
 /// показа текста, поэтому текст разбора не ждёт тяжёлую картинку.
 Future<ImageProvider> loadIllustration(String imagePrompt) =>
     _analysisService.generateImage(imagePrompt);

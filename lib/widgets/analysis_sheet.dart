@@ -5,6 +5,7 @@ import '../models/analysis_result.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'analysis_sheet_controller.dart';
+import 'illustration_view.dart';
 import 'shimmer.dart';
 
 export 'analysis_sheet_controller.dart';
@@ -15,12 +16,17 @@ export 'analysis_sheet_controller.dart';
 /// [fetch] — запрос к бэкенду (см. [AnalysisFetcher]). Шторка сама
 /// переключает состояния: Loading → Success или Error → «Повторить».
 ///
+/// [loadIllustration] — загрузка картинки по `image_prompt` (см.
+/// [IllustrationLoader]). Пока её не передали — в шторке пунктирная
+/// заглушка «Здесь появится иллюстрация».
+///
 /// Закрывается свайпом вниз, тапом по затемнению или крестиком ✕;
 /// экран чтения под ней не пересоздаётся, позиция не теряется.
 Future<void> showAnalysisSheet(
   BuildContext context, {
   required String fragment,
   required AnalysisFetcher fetch,
+  IllustrationLoader? loadIllustration,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -43,16 +49,22 @@ Future<void> showAnalysisSheet(
     builder: (_) => _AnalysisSheetHost(
       fragment: fragment,
       fetch: applyDebugAnalysisMode(fetch),
+      loadIllustration: applyDebugIllustrationMode(loadIllustration),
     ),
   );
 }
 
 /// Создаёт контроллер на время жизни шторки и отправляет первый запрос.
 class _AnalysisSheetHost extends StatefulWidget {
-  const _AnalysisSheetHost({required this.fragment, required this.fetch});
+  const _AnalysisSheetHost({
+    required this.fragment,
+    required this.fetch,
+    required this.loadIllustration,
+  });
 
   final String fragment;
   final AnalysisFetcher fetch;
+  final IllustrationLoader? loadIllustration;
 
   @override
   State<_AnalysisSheetHost> createState() => _AnalysisSheetHostState();
@@ -81,6 +93,7 @@ class _AnalysisSheetHostState extends State<_AnalysisSheetHost> {
       builder: (context, state, _) => AnalysisSheetView(
         fragment: widget.fragment,
         state: state,
+        loadIllustration: widget.loadIllustration,
         onRetry: _controller.retry,
         onClose: () => Navigator.of(context).maybePop(),
       ),
@@ -95,12 +108,14 @@ class AnalysisSheetView extends StatelessWidget {
     super.key,
     required this.fragment,
     required this.state,
+    this.loadIllustration,
     required this.onRetry,
     required this.onClose,
   });
 
   final String fragment;
   final AnalysisSheetState state;
+  final IllustrationLoader? loadIllustration;
   final VoidCallback onRetry;
   final VoidCallback onClose;
 
@@ -112,8 +127,11 @@ class AnalysisSheetView extends StatelessWidget {
 
     final Widget content = switch (state) {
       AnalysisLoading() => const _LoadingContent(key: ValueKey('loading')),
-      AnalysisLoaded(:final result) =>
-        _ResultContent(key: const ValueKey('result'), result: result),
+      AnalysisLoaded(:final result) => _ResultContent(
+          key: const ValueKey('result'),
+          result: result,
+          loadIllustration: loadIllustration,
+        ),
       AnalysisFailed() => _ErrorContent(
           key: const ValueKey('error'),
           onRetry: onRetry,
@@ -191,17 +209,26 @@ class AnalysisSheetView extends StatelessWidget {
 // ───────────────────────── Normal ─────────────────────────
 
 class _ResultContent extends StatelessWidget {
-  const _ResultContent({super.key, required this.result});
+  const _ResultContent({
+    super.key,
+    required this.result,
+    required this.loadIllustration,
+  });
 
   final AnalysisResult result;
+  final IllustrationLoader? loadIllustration;
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     final slang = result.slangOrEtymology;
+    final prompt = result.imagePrompt;
 
+    // spacing — отступ только между блоками: если какой-то блок скрыт,
+    // лишнего пустого места не остаётся.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 18,
       children: [
         _Section(
           icon: Icons.translate_rounded,
@@ -219,19 +246,27 @@ class _ResultContent extends StatelessWidget {
             style: AppText.body.copyWith(color: c.text),
           ),
         ),
-        // AC 4.3: нет сленга — блока нет вовсе, без пустого места.
+        // Нет сленга — блока нет вовсе, без пустого места.
         if (slang != null)
           _Section(
             icon: Icons.history_edu_outlined,
             label: 'Этимология / сленг',
             child: Text(slang, style: AppText.body.copyWith(color: c.text)),
           ),
-        const _Section(
-          icon: Icons.image_outlined,
-          label: 'Иллюстрация',
-          isLast: true,
-          child: _ImagePlaceholder(),
-        ),
+        // Сервер не придумал сцену (image_prompt = null) — рисовать нечего.
+        if (prompt != null)
+          _Section(
+            icon: Icons.image_outlined,
+            label: 'Иллюстрация',
+            child: switch (loadIllustration) {
+              final load? => IllustrationView(
+                  key: ValueKey(prompt),
+                  prompt: prompt,
+                  load: load,
+                ),
+              null => const IllustrationPlaceholder(),
+            },
+          ),
       ],
     );
   }
@@ -242,26 +277,21 @@ class _Section extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.child,
-    this.isLast = false,
   });
 
   final IconData icon;
   final String label;
   final Widget child;
-  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _SectionLabel(icon: icon, label: label),
-          const SizedBox(height: 6),
-          child,
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionLabel(icon: icon, label: label),
+        const SizedBox(height: 6),
+        child,
+      ],
     );
   }
 }
@@ -283,69 +313,6 @@ class _SectionLabel extends StatelessWidget {
       ],
     );
   }
-}
-
-/// AC 4.4: место под будущую сгенерированную иллюстрацию сцены.
-class _ImagePlaceholder extends StatelessWidget {
-  const _ImagePlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return CustomPaint(
-      painter: _DashedBorderPainter(color: c.divider, radius: 12),
-      child: Container(
-        height: 150,
-        decoration: BoxDecoration(
-          color: c.bg,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.image_outlined, size: 28, color: c.textSecondary),
-            const SizedBox(height: 8),
-            Text(
-              'Здесь появится иллюстрация',
-              style: AppText.caption.copyWith(color: c.textSecondary),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DashedBorderPainter extends CustomPainter {
-  _DashedBorderPainter({required this.color, required this.radius});
-
-  final Color color;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    final rrect = RRect.fromRectAndRadius(
-      (Offset.zero & size).deflate(0.75),
-      Radius.circular(radius),
-    );
-    final path = Path()..addRRect(rrect);
-    const dash = 6.0, gap = 4.0;
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        canvas.drawPath(metric.extractPath(distance, distance + dash), paint);
-        distance += dash + gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter old) =>
-      old.color != color || old.radius != radius;
 }
 
 // ───────────────────────── Loading ─────────────────────────
@@ -398,7 +365,10 @@ class _LoadingContent extends StatelessWidget {
                   label: 'Иллюстрация',
                 ),
                 const SizedBox(height: 10),
-                const SkeletonBox(height: 150, radius: 12),
+                const AspectRatio(
+                  aspectRatio: illustrationAspectRatio,
+                  child: SkeletonBox(height: double.infinity, radius: 12),
+                ),
               ],
             ),
           ),

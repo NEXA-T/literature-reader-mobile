@@ -22,76 +22,30 @@ Color coverColorFor(String title) {
   return _coverPalette[hash % _coverPalette.length];
 }
 
-/// Подпись прогресса: `null` или 0 — книга ещё не открывалась.
-String progressLabel(double? p) {
-  if (p == null || p <= 0) return 'Не начата';
-  if (p >= 1) return 'Прочитана';
-  return '${(p * 100).round()}%';
-}
-
-/// Обложка книги. Если в EPUB нет картинки — рисуем аккуратную
-/// «тканевую» обложку с названием, чтобы список не выглядел пустым.
+/// Обложка книги. Если в EPUB нет картинки — рисуем градиентную
+/// «тканевую» обложку с названием и (на крупных обложках) автором.
 class BookCover extends StatelessWidget {
   const BookCover({
     super.key,
     required this.title,
+    this.author,
     this.cover,
     this.width = 56,
     this.height = 80,
   });
 
   final String title;
+  final String? author;
   final ImageProvider? cover;
+
+  /// `double.infinity` — занять всё место, которое даёт родитель.
   final double width;
   final double height;
 
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(6);
-    final color = coverColorFor(title);
     final image = cover;
-
-    final generated = DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [color, Color.lerp(color, Colors.black, 0.25)!],
-        ),
-      ),
-      child: Stack(
-        children: [
-          // «Корешок» слева.
-          Positioned(
-            left: 4,
-            top: 0,
-            bottom: 0,
-            child: Container(
-              width: 1,
-              color: Colors.white.withValues(alpha: 0.25),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              width * 0.16,
-              height * 0.1,
-              width * 0.08,
-              height * 0.08,
-            ),
-            child: Text(
-              title,
-              maxLines: 4,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.bookQuote.copyWith(
-                color: Colors.white,
-                fontSize: width / 6.2,
-                height: 1.2,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
 
     return Container(
       width: width,
@@ -108,14 +62,100 @@ class BookCover extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: image == null
-            ? generated
-            : Image(
-                image: image,
-                fit: BoxFit.cover,
-                // Битый файл обложки — показываем сгенерированную.
-                errorBuilder: (_, _, _) => generated,
-              ),
+        child: LayoutBuilder(
+          builder: (context, size) {
+            final generated = _GeneratedCover(
+              title: title,
+              author: author,
+              size: size.biggest,
+            );
+            if (image == null) return generated;
+            return Image(
+              image: image,
+              fit: BoxFit.cover,
+              // Битый файл обложки — показываем сгенерированную.
+              errorBuilder: (_, _, _) => generated,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _GeneratedCover extends StatelessWidget {
+  const _GeneratedCover({
+    required this.title,
+    required this.author,
+    required this.size,
+  });
+
+  final String title;
+  final String? author;
+  final Size size;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = coverColorFor(title);
+    final w = size.width;
+    final h = size.height;
+    // На маленьких обложках в списке автор не читается — не показываем.
+    final showAuthor = author != null && author!.isNotEmpty && h >= 100;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [color, Color.lerp(color, Colors.black, 0.28)!],
+        ),
+      ),
+      child: Stack(
+        children: [
+          // «Корешок» слева.
+          Positioned(
+            left: 4,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 1,
+              color: Colors.white.withValues(alpha: 0.25),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(w * 0.16, h * 0.08, w * 0.08, h * 0.07),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.bookQuote.copyWith(
+                      color: Colors.white,
+                      fontSize: w / 6.2,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+                if (showAuthor) ...[
+                  const Spacer(),
+                  Text(
+                    author!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption.copyWith(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: w / 10,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -137,6 +177,42 @@ class ReadingProgressBar extends StatelessWidget {
         minHeight: 4,
         backgroundColor: c.divider,
         color: c.accent,
+      ),
+    );
+  }
+}
+
+/// Компактный бейдж прогресса: «42%», «Новая» или «Прочитана».
+class ProgressBadge extends StatelessWidget {
+  const ProgressBadge({super.key, required this.progress});
+
+  /// От 0 до 1; `null` — книгу ещё не открывали.
+  final double? progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final p = progress ?? 0;
+    final (label, background, foreground) = p <= 0
+        ? ('Новая', c.controlBg, c.textSecondary)
+        : p >= 1
+        ? ('Прочитана', c.accentStrong, c.onAccent)
+        : ('${(p * 100).round()}%', c.highlight, c.chipText);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: AppText.caption.copyWith(
+          color: foreground,
+          fontWeight: FontWeight.w600,
+          fontSize: 11,
+          height: 1.2,
+        ),
       ),
     );
   }
@@ -176,7 +252,13 @@ class ContinueReadingCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              BookCover(title: title, cover: cover, width: 72, height: 104),
+              BookCover(
+                title: title,
+                author: author,
+                cover: cover,
+                width: 80,
+                height: 120,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -201,15 +283,10 @@ class ContinueReadingCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     ReadingProgressBar(value: progress ?? 0),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
-                        Text(
-                          progressLabel(progress),
-                          style: AppText.caption.copyWith(
-                            color: c.textSecondary,
-                          ),
-                        ),
+                        ProgressBadge(progress: progress),
                         const Spacer(),
                         Text(
                           'Продолжить',
@@ -235,7 +312,7 @@ class ContinueReadingCard extends StatelessWidget {
   }
 }
 
-/// Строка книги в общем списке.
+/// Строка книги в виде «Список».
 class BookListTile extends StatelessWidget {
   const BookListTile({
     super.key,
@@ -261,17 +338,29 @@ class BookListTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
           children: [
-            BookCover(title: title, cover: cover),
+            BookCover(title: title, author: author, cover: cover),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.bodyStrong.copyWith(color: c.text),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.bodyStrong.copyWith(color: c.text),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: ProgressBadge(progress: progress),
+                      ),
+                    ],
                   ),
                   Text(
                     author,
@@ -283,29 +372,84 @@ class BookListTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ReadingProgressBar(value: progress ?? 0),
-                      ),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        width: 68,
-                        child: Text(
-                          progressLabel(progress),
-                          textAlign: TextAlign.right,
-                          style: AppText.caption.copyWith(
-                            color: c.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  ReadingProgressBar(value: progress ?? 0),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Карточка книги в виде «Сетка» (как полка Apple Books):
+/// крупная обложка с бейджем, тонкий прогресс, название и автор.
+class BookGridCard extends StatelessWidget {
+  const BookGridCard({
+    super.key,
+    required this.title,
+    required this.author,
+    this.progress,
+    this.cover,
+    this.onTap,
+  });
+
+  final String title;
+  final String author;
+  final double? progress;
+  final ImageProvider? cover;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 2 / 3,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                BookCover(
+                  title: title,
+                  author: author,
+                  cover: cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                ),
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: ProgressBadge(progress: progress),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          ReadingProgressBar(value: progress ?? 0),
+          const SizedBox(height: 6),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.bodyStrong.copyWith(
+              color: c.text,
+              fontSize: 14,
+              height: 1.3,
+            ),
+          ),
+          Text(
+            author,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.caption.copyWith(color: c.textSecondary),
+          ),
+        ],
       ),
     );
   }
