@@ -18,6 +18,17 @@ import '../theme/app_theme.dart';
 import '../widgets/book_widgets.dart';
 import '../widgets/theme_menu_button.dart';
 
+/// Стиль текста книги — один и тот же для разбивки на страницы и для
+/// отрисовки (#19).
+///
+/// SelectableText не рисует переданный стиль «как есть»: он смешивает его
+/// со стилем по умолчанию из темы (DefaultTextStyle). Поэтому и страницы
+/// считаем по уже смешанному стилю — иначе на экране строки выходят шире,
+/// чем насчитано, и нижняя строка страницы обрезается.
+TextStyle readerTextStyle(BuildContext context) => DefaultTextStyle.of(
+  context,
+).style.merge(AppText.bookBody.copyWith(color: context.colors.text));
+
 /// Экран чтения (US-02): постраничный просмотр книги, сохранение позиции,
 /// выделение текста с вызовом шторки «Объяснить с AI» (US-03).
 class ReaderScreen extends StatefulWidget {
@@ -42,6 +53,13 @@ class _ReaderData {
 class _ReaderScreenState extends State<ReaderScreen>
     with WidgetsBindingObserver {
   static const _pagePadding = EdgeInsets.fromLTRB(24, 16, 24, 16);
+
+  /// SelectableText оставляет справа место под курсор (зазор 1 + курсор 2)
+  /// и поэтому переносит строки чуть раньше, чем TextPainter в paginate().
+  /// Считаем страницы с тем же запасом, иначе строк на странице выходит
+  /// больше, чем насчитано, и нижняя обрезается (#19).
+  static const _caretMargin = 3.0;
+
   static const _paragraphSpacing = 12.0;
 
   /// Доля ширины экрана слева/справа, тап по которой листает страницу
@@ -114,8 +132,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Текст книги — Literata 18 / 160% из макета Figma.
   /// Цвет берётся из текущей темы и на разбивку по страницам не влияет.
-  TextStyle _textStyle(BuildContext context) =>
-      AppText.bookBody.copyWith(color: context.colors.text);
+  TextStyle _textStyle(BuildContext context) => readerTextStyle(context);
 
   /// Пересчитывает страницы, если поменялся размер области или масштаб шрифта.
   /// Позиция в тексте при этом сохраняется (AC 2.1).
@@ -125,7 +142,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     _ReaderData data,
   ) {
     final scaler = MediaQuery.textScalerOf(context);
-    final width = constraints.maxWidth - _pagePadding.horizontal;
+    final width =
+        constraints.maxWidth - _pagePadding.horizontal - _caretMargin;
     final height = constraints.maxHeight - _pagePadding.vertical - 4;
     final key = '${width.round()}x${height.round()}@${scaler.scale(18)}';
     if (key == _layoutKey) return;
@@ -299,43 +317,50 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Widget _buildReader(_ReaderData data) {
-    return Column(
-      children: [
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final hadPages = _pages.isNotEmpty;
-              _ensurePaginated(context, constraints, data);
-              if (!hadPages && _pages.isNotEmpty) {
-                // Обновить заголовок главы в AppBar после первой разметки
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) setState(() {});
-                });
-              }
-              if (_pages.isEmpty) {
-                return const Center(child: Text('В книге не найден текст'));
-              }
+    // Текст не должен заходить под системную полоску жестов внизу экрана:
+    // SafeArea уменьшает высоту области, и страницы пересчитываются под неё
+    // (в т.ч. при повороте экрана и на телефонах с другой высотой) — #19.
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final hadPages = _pages.isNotEmpty;
+                _ensurePaginated(context, constraints, data);
+                if (!hadPages && _pages.isNotEmpty) {
+                  // Обновить заголовок главы в AppBar после первой разметки
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) setState(() {});
+                  });
+                }
+                if (_pages.isEmpty) {
+                  return const Center(child: Text('В книге не найден текст'));
+                }
 
-              return Listener(
-                onPointerDown: _onPointerDown,
-                onPointerUp: (e) => _onPointerUp(e, constraints.maxWidth),
-                onPointerCancel: (_) => _downPosition = null,
-                child: PageView.builder(
-                  controller: _pageController,
-                  itemCount: _pages.length,
-                  onPageChanged: (page) {
-                    setState(() => _currentPage = page);
-                    _selectionActive = false;
-                    _saveProgress();
-                  },
-                  itemBuilder: (context, index) =>
-                      _buildPage(context, _pages[index]),
-                ),
-              );
-            },
+                return Listener(
+                  onPointerDown: _onPointerDown,
+                  onPointerUp: (e) => _onPointerUp(e, constraints.maxWidth),
+                  onPointerCancel: (_) => _downPosition = null,
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: _pages.length,
+                    onPageChanged: (page) {
+                      setState(() => _currentPage = page);
+                      _selectionActive = false;
+                      _saveProgress();
+                    },
+                    itemBuilder: (context, index) =>
+                        _buildPage(context, _pages[index]),
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
