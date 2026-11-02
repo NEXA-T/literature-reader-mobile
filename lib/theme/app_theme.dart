@@ -9,6 +9,9 @@ abstract final class AppText {
     fontFamily: 'Literata',
     fontSize: 18,
     height: 1.6,
+    // Явно: иначе текст книги наследует разрядку из темы Material.
+    letterSpacing: 0,
+    wordSpacing: 0,
   );
   static const bookQuote = TextStyle(
     fontFamily: 'Literata',
