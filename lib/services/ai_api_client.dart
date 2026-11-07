@@ -141,8 +141,12 @@ class AiApiClient {
       if (json is Map<String, dynamic>) {
         final url = (json['image_url'] ?? json['url']) as String?;
         if (url != null && url.isNotEmpty) {
+          final full = Uri.parse(ApiConfig.baseUrl).resolve(url).toString();
+          debugPrint('[AI API] ссылка на картинку: $full');
           return NetworkImage(
-            Uri.parse(ApiConfig.baseUrl).resolve(url).toString(),
+            full,
+            // Чтобы ngrok не подсовывал свою страницу-предупреждение
+            headers: const {'ngrok-skip-browser-warning': 'true'},
           );
         }
         var b64 = (json['image_base64'] ?? json['image']) as String?;
