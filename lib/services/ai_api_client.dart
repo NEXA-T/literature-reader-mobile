@@ -116,7 +116,7 @@ class AiApiClient {
     try {
       response = await _dio.post<List<int>>(
         ApiConfig.generateImagePath,
-        data: {'image_prompt': imagePrompt},
+        data: {'prompt': imagePrompt},
         options: Options(
           responseType: ResponseType.bytes,
           receiveTimeout: ApiConfig.imageReceiveTimeout,
