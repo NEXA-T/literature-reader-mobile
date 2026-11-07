@@ -66,6 +66,18 @@ void main() {
     expect((await cache.loadAll()).length, 1);
   });
 
+  test('удаление книги убирает только её разборы', () async {
+    final cache = AnalysisCacheService();
+    await cache.save(_entry('one', book: 'b1'));
+    await cache.save(_entry('two', book: 'b2'));
+
+    await cache.removeBook('b1');
+
+    final left = await cache.loadAll();
+    expect(left.length, 1);
+    expect(left.single.bookId, 'b2');
+  });
+
   test('прогресс: старые записи без номера страницы читаются', () {
     final p = ReadingProgress.fromJson({
       'chapterIndex': 2,

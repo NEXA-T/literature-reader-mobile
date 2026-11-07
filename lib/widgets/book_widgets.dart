@@ -227,6 +227,7 @@ class ContinueReadingCard extends StatelessWidget {
     this.progress,
     this.cover,
     this.onTap,
+    this.onMenu,
   });
 
   final String title;
@@ -234,6 +235,9 @@ class ContinueReadingCard extends StatelessWidget {
   final double? progress;
   final ImageProvider? cover;
   final VoidCallback? onTap;
+
+  /// Меню книги (удаление, #20): долгое нажатие или ⋮
+  final VoidCallback? onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -243,6 +247,7 @@ class ContinueReadingCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onMenu,
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.all(14),
@@ -321,6 +326,7 @@ class BookListTile extends StatelessWidget {
     this.progress,
     this.cover,
     this.onTap,
+    this.onMenu,
   });
 
   final String title;
@@ -329,11 +335,15 @@ class BookListTile extends StatelessWidget {
   final ImageProvider? cover;
   final VoidCallback? onTap;
 
+  /// Меню книги (удаление, #20): долгое нажатие или ⋮
+  final VoidCallback? onMenu;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return InkWell(
       onTap: onTap,
+      onLongPress: onMenu,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
@@ -376,6 +386,12 @@ class BookListTile extends StatelessWidget {
                 ],
               ),
             ),
+            if (onMenu != null)
+              IconButton(
+                tooltip: 'Действия с книгой',
+                onPressed: onMenu,
+                icon: Icon(Icons.more_vert_rounded, color: c.textSecondary),
+              ),
           ],
         ),
       ),
@@ -393,6 +409,7 @@ class BookGridCard extends StatelessWidget {
     this.progress,
     this.cover,
     this.onTap,
+    this.onMenu,
   });
 
   final String title;
@@ -401,11 +418,15 @@ class BookGridCard extends StatelessWidget {
   final ImageProvider? cover;
   final VoidCallback? onTap;
 
+  /// Меню книги (удаление, #20): долгое нажатие или ⋮
+  final VoidCallback? onMenu;
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
     return InkWell(
       onTap: onTap,
+      onLongPress: onMenu,
       borderRadius: BorderRadius.circular(8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

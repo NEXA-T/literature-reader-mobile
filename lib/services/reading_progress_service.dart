@@ -22,4 +22,10 @@ class ReadingProgressService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key(bookId), jsonEncode(progress.toJson()));
   }
+
+  /// Удаляет прогресс книги (#20).
+  Future<void> delete(String bookId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key(bookId));
+  }
 }

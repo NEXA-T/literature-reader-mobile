@@ -109,4 +109,25 @@ class BookStorageService {
       );
     }
   }
+
+  /// Удаляет книгу (#20): файл .epub, обложку и запись в библиотеке.
+  Future<void> deleteBook(Book book) async {
+    final dir = await booksDir();
+    for (final name in [book.fileName, book.coverFileName]) {
+      if (name == null) continue;
+      final file = File(p.join(dir.path, name));
+      if (await file.exists()) await file.delete();
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_prefsKey) ?? [];
+    raw.removeWhere((s) {
+      try {
+        return (jsonDecode(s) as Map<String, dynamic>)['id'] == book.id;
+      } catch (_) {
+        return false;
+      }
+    });
+    await prefs.setStringList(_prefsKey, raw);
+  }
 }

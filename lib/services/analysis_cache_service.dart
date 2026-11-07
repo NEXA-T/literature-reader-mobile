@@ -56,4 +56,15 @@ class AnalysisCacheService {
       items.map((e) => jsonEncode(e.toJson())).toList(),
     );
   }
+
+  /// Удаляет все сохранённые разборы книги (#20).
+  Future<void> removeBook(String bookId) async {
+    final items = await loadAll()
+      ..removeWhere((e) => e.bookId == bookId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _prefsKey,
+      items.map((e) => jsonEncode(e.toJson())).toList(),
+    );
+  }
 }
