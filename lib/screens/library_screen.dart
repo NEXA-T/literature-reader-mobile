@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/book.dart';
 import '../models/reading_progress.dart';
+import '../services/analysis_cache_service.dart';
 import '../services/book_storage_service.dart';
 import '../services/reading_progress_service.dart';
 import '../theme/app_colors.dart';
@@ -23,6 +24,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   final _storage = BookStorageService();
   final _progressService = ReadingProgressService();
+  final _cache = AnalysisCacheService();
   List<Book> _books = [];
   Map<String, ReadingProgress> _progress = {};
   String? _booksDirPath;
@@ -93,6 +95,87 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  /// Меню книги (#20): долгое нажатие на карточку или ⋮ в списке.
+  Future<void> _showBookMenu(Book book) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        final error = Theme.of(context).colorScheme.error;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.menu_book_rounded),
+                title: const Text('Читать'),
+                onTap: () => Navigator.pop(context, 'open'),
+              ),
+              ListTile(
+                leading: Icon(Icons.delete_outline_rounded, color: error),
+                title: Text('Удалить книгу', style: TextStyle(color: error)),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted) return;
+    if (action == 'open') await _openBook(book);
+    if (action == 'delete') await _confirmDelete(book);
+  }
+
+  /// Подтверждение, чтобы не удалить книгу случайно.
+  Future<void> _confirmDelete(Book book) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить книгу?'),
+        content: Text(
+          'Вы действительно хотите удалить «${book.title}»? '
+          'Файл книги, прогресс чтения и сохранённые разборы '
+          'будут удалены с устройства.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _deleteBook(book);
+  }
+
+  Future<void> _deleteBook(Book book) async {
+    try {
+      await _storage.deleteBook(book);
+      await _progressService.delete(book.id);
+      await _cache.removeBook(book.id);
+    } catch (_) {
+      _showMessage(
+        'Не удалось удалить книгу. Попробуйте ещё раз',
+        isError: true,
+      );
+      return;
+    }
+    if (!mounted) return;
+    // Список обновляется сразу, без перезапуска
+    setState(() {
+      _books.removeWhere((b) => b.id == book.id);
+      _progress.remove(book.id);
+    });
+    _showMessage('Книга «${book.title}» удалена');
+  }
+
   void _showMessage(String text, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -149,6 +232,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   progress: _progress[book.id]?.percent,
                   cover: _coverOf(book),
                   onTap: () => _openBook(book),
+                  onMenu: () => _showBookMenu(book),
                 ),
               ),
           ],
@@ -213,6 +297,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             progress: _progress[lastRead.id]?.percent,
                             cover: _coverOf(lastRead),
                             onTap: () => _openBook(lastRead),
+                            onMenu: () => _showBookMenu(lastRead),
                           ),
                           const SizedBox(height: 28),
                         ],
@@ -238,6 +323,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         progress: _progress[book.id]?.percent,
                         cover: _coverOf(book),
                         onTap: () => _openBook(book),
+                        onMenu: () => _showBookMenu(book),
                       );
                     },
                     separatorBuilder: (_, _) =>
