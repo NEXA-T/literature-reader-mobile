@@ -133,6 +133,50 @@ void main() {
     expect(find.text('Не удалось создать иллюстрацию'), findsNothing);
   });
 
+  testWidgets('долгая генерация: через 8 с появляется подсказка',
+      (tester) async {
+    final gen = _FakeLoader();
+    await tester.pumpWidget(_app(gen.call));
+    await tester.pump();
+    final size = tester.getSize(find.byType(IllustrationView));
+
+    double hintOpacity() => tester
+        .widget<AnimatedOpacity>(find.ancestor(
+          of: find.text('Обычно это занимает до 40 секунд'),
+          matching: find.byType(AnimatedOpacity),
+        ))
+        .opacity;
+
+    expect(hintOpacity(), 0);
+    await tester.pump(const Duration(seconds: 9));
+    expect(hintOpacity(), 1);
+    // Подсказка не сдвигает блок: место под неё зарезервировано заранее.
+    expect(tester.getSize(find.byType(IllustrationView)), size);
+
+    gen.calls.single.complete(_pixel);
+    await tester.pumpAndSettle();
+    expect(find.text('Обычно это занимает до 40 секунд'), findsNothing);
+  });
+
+  testWidgets('SVG-заглушка от сервера сразу даёт «Повторить генерацию»',
+      (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(_app((imagePrompt) async {
+      calls++;
+      return calls == 1
+          ? NetworkImage('https://example.ngrok-free.app/static/'
+              'generated_images/img_1.svg')
+          : _pixel;
+    }));
+    await tester.pumpAndSettle();
+    expect(find.text('Не удалось создать иллюстрацию'), findsOneWidget);
+
+    await tester.tap(find.text('Повторить генерацию'));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.byType(Image), findsOneWidget);
+  });
+
   testWidgets('ответ после закрытия не роняет виджет', (tester) async {
     final gen = _FakeLoader();
     await tester.pumpWidget(_app(gen.call));

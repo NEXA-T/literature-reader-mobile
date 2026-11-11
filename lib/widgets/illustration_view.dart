@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -65,6 +67,13 @@ class _IllustrationViewState extends State<IllustrationView> {
     try {
       final image = await widget.load(widget.prompt);
       if (!mounted || attempt != _attempt) return;
+      // Не успев за отведённое время, бэкенд отвечает ссылкой на SVG-заглушку,
+      // а Flutter SVG не рисует. Сразу показываем «Повторить генерацию».
+      if (image is NetworkImage &&
+          Uri.tryParse(image.url)?.path.toLowerCase().endsWith('.svg') ==
+              true) {
+        throw StateError('сервер вернул SVG-заглушку: ${image.url}');
+      }
       setState(() {
         _image = image;
         _phase = _Phase.ready;
@@ -135,8 +144,35 @@ class _IllustrationViewState extends State<IllustrationView> {
 
 // ───────────────────────── Генерация ─────────────────────────
 
-class _Generating extends StatelessWidget {
+class _Generating extends StatefulWidget {
   const _Generating({super.key});
+
+  /// Через сколько показать подсказку, что генерация идёт долго.
+  static const hintDelay = Duration(seconds: 8);
+
+  @override
+  State<_Generating> createState() => _GeneratingState();
+}
+
+class _GeneratingState extends State<_Generating> {
+  Timer? _timer;
+  bool _slow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Настоящая генерация GigaChat занимает 20–40 секунд: без подсказки
+    // долгий шиммер выглядит как зависание (#23).
+    _timer = Timer(_Generating.hintDelay, () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -149,17 +185,35 @@ class _Generating extends StatelessWidget {
         children: [
           const Shimmer(child: SkeletonBox(height: double.infinity, radius: 12)),
           Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.palette_outlined, size: 28, color: c.textSecondary),
-                const SizedBox(height: 8),
-                Text(
-                  'Генерируем иллюстрацию сцены…',
-                  textAlign: TextAlign.center,
-                  style: AppText.caption.copyWith(color: c.textSecondary),
-                ),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.palette_outlined, size: 28, color: c.textSecondary),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Генерируем иллюстрацию сцены…',
+                    textAlign: TextAlign.center,
+                    style: AppText.caption.copyWith(color: c.textSecondary),
+                  ),
+                  AnimatedOpacity(
+                    opacity: _slow ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'Обычно это занимает до 40 секунд',
+                        textAlign: TextAlign.center,
+                        style: AppText.caption.copyWith(
+                          color: c.textSecondary,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
