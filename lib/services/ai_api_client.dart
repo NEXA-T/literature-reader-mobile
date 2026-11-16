@@ -104,9 +104,9 @@ class AiApiClient {
   /// Возвращает [ImageProvider] — его можно сразу отдать в Image(image: ...).
   /// При ошибке бросает [AnalysisException], как и [analyze].
   ///
-  /// Формат ответа бэкенд ещё не зафиксировал, поэтому понимаем три варианта:
-  /// сама картинка (Content-Type: image/*), JSON со ссылкой
-  /// (`image_url` / `url`) или JSON с base64 (`image_base64` / `image`).
+  /// Бэкенд отвечает `{"image_url": "/static/...jpg", "prompt_used": ...}`.
+  /// На всякий случай понимаем и другие варианты: саму картинку
+  /// (Content-Type: image/*) или JSON с base64 (`image_base64` / `image`).
   Future<ImageProvider> generateImage(String imagePrompt) async {
     if (!await _hasNetwork()) {
       throw const AnalysisException(AnalysisFailureKind.offline);
@@ -143,11 +143,12 @@ class AiApiClient {
         if (url != null && url.isNotEmpty) {
           final full = Uri.parse(ApiConfig.baseUrl).resolve(url).toString();
           debugPrint('[AI API] ссылка на картинку: $full');
-          return NetworkImage(
-            full,
-            // Чтобы ngrok не подсовывал свою страницу-предупреждение
-            headers: const {'ngrok-skip-browser-warning': 'true'},
-          );
+          // Генератор не успел — сервер прислал SVG-заглушку. Flutter SVG
+          // не рисует, поэтому сразу показываем «Повторить генерацию».
+          if (Uri.parse(full).path.toLowerCase().endsWith('.svg')) {
+            throw const AnalysisException(AnalysisFailureKind.server);
+          }
+          return MemoryImage(await _downloadImage(full));
         }
         var b64 = (json['image_base64'] ?? json['image']) as String?;
         if (b64 != null && b64.isNotEmpty) {
@@ -162,6 +163,94 @@ class AiApiClient {
       debugPrint('[AI API] не удалось разобрать ответ с картинкой: $e');
     }
     throw const AnalysisException(AnalysisFailureKind.server);
+  }
+
+  /// Отдельный клиент без логгера, чтобы байты картинки не сыпались в консоль.
+  static final _imageDio = Dio(
+    BaseOptions(
+      connectTimeout: ApiConfig.connectTimeout,
+      receiveTimeout: ApiConfig.imageReceiveTimeout,
+      responseType: ResponseType.bytes,
+      // Картинку качаем кусками без сжатия (иначе Range не работает),
+      // каждый кусок — отдельным соединением.
+      persistentConnection: false,
+      headers: {
+        'ngrok-skip-browser-warning': 'true',
+        'Accept-Encoding': 'identity',
+        'User-Agent': 'literature-reader/1.0',
+      },
+    ),
+  );
+
+  /// Размер куска при скачивании картинки. Через ngrok ответ из приложения
+  /// обрывается примерно после 21 КБ, а куски меньше этого проходят.
+  static const _chunkSize = 16 * 1024;
+
+  /// Скачивает картинку кусками через HTTP Range (сервер это поддерживает:
+  /// `accept-ranges: bytes`). Пока не скачано — в шторке шиммер,
+  /// если не вышло за минуту — «Повторить генерацию».
+  Future<Uint8List> _downloadImage(String url) async {
+    final watch = Stopwatch()..start();
+    final result = <int>[];
+    int? total;
+
+    while (total == null || result.length < total) {
+      if (watch.elapsed > ApiConfig.imageReceiveTimeout) {
+        debugPrint('[AI API] картинка не скачалась за отведённое время');
+        throw const AnalysisException(AnalysisFailureKind.server);
+      }
+      final part = await _downloadPart(url, result.length);
+      if (part.bytes.isEmpty) {
+        throw const AnalysisException(AnalysisFailureKind.server);
+      }
+      result.addAll(part.bytes);
+      if (part.whole) break; // сервер прислал файл целиком
+      total ??= part.total;
+      if (total == null) {
+        throw const AnalysisException(AnalysisFailureKind.server);
+      }
+    }
+
+    debugPrint(
+      '[AI API] картинка скачана: ${result.length ~/ 1024} КБ '
+      'за ${watch.elapsedMilliseconds} мс',
+    );
+    return Uint8List.fromList(result);
+  }
+
+  /// Один кусок файла начиная с [start]. До трёх попыток на кусок.
+  Future<({List<int> bytes, int? total, bool whole})> _downloadPart(
+    String url,
+    int start,
+  ) async {
+    final end = start + _chunkSize - 1;
+    for (var attempt = 1; ; attempt++) {
+      try {
+        final response = await _imageDio
+            .get<List<int>>(
+              url,
+              options: Options(headers: {'Range': 'bytes=$start-$end'}),
+            )
+            .timeout(const Duration(seconds: 10));
+        final bytes = response.data ?? const <int>[];
+        if (response.statusCode == 206) {
+          // Content-Range: bytes 0-16383/152941 — после «/» общий размер
+          final range = response.headers.value('content-range') ?? '';
+          return (
+            bytes: bytes,
+            total: int.tryParse(range.split('/').last),
+            whole: false,
+          );
+        }
+        // 200 — сервер не стал резать файл и прислал его целиком
+        return (bytes: bytes, total: bytes.length, whole: true);
+      } catch (e) {
+        debugPrint('[AI API] кусок с $start байта, попытка $attempt: $e');
+        if (attempt >= 3) {
+          throw const AnalysisException(AnalysisFailureKind.server);
+        }
+      }
+    }
   }
 
   Future<bool> _hasNetwork() async {
