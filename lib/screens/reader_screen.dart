@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ai_explain/ai_explain_request.dart';
 import '../ai_explain/ai_explain_sheet.dart';
@@ -25,9 +26,9 @@ import '../widgets/theme_menu_button.dart';
 /// со стилем по умолчанию из темы (DefaultTextStyle). Поэтому и страницы
 /// считаем по уже смешанному стилю — иначе на экране строки выходят шире,
 /// чем насчитано, и нижняя строка страницы обрезается.
-TextStyle readerTextStyle(BuildContext context) => DefaultTextStyle.of(
-  context,
-).style.merge(AppText.bookBody.copyWith(color: context.colors.text));
+TextStyle readerTextStyle(BuildContext context) =>
+    DefaultTextStyle.of(context).style
+        .merge(AppText.bookBody.copyWith(color: context.colors.text));
 
 /// Экран чтения (US-02): постраничный просмотр книги, сохранение позиции,
 /// выделение текста с вызовом шторки «Объяснить с AI» (US-03).
@@ -79,6 +80,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   DateTime? _downTime;
   Timer? _tapTimer;
   bool _selectionActive = false;
+  String _selectedText = '';
+  String _selectedParagraph = '';
+  int _selectedChapterIndex = 0;
+  static const _aiHintSeenKey = 'reader_ai_card_seen';
+  static const _aiHint =
+      'Выделите слово или отрывок текста и нажмите на эту кнопку. '
+      'AI объяснит сложные слова, выражения и смысл текста.';
+  final _aiHintKey = GlobalKey();
+  bool _aiHintOpen = false;
+  bool _aiHintScheduled = false;
 
   @override
   void initState() {
@@ -142,8 +153,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _ReaderData data,
   ) {
     final scaler = MediaQuery.textScalerOf(context);
-    final width =
-        constraints.maxWidth - _pagePadding.horizontal - _caretMargin;
+    final width = constraints.maxWidth - _pagePadding.horizontal - _caretMargin;
     final height = constraints.maxHeight - _pagePadding.vertical - 4;
     final key = '${width.round()}x${height.round()}@${scaler.scale(18)}';
     if (key == _layoutKey) return;
@@ -241,6 +251,25 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ---------------------------------------------------------------- AI
 
+  void _updateSelection(String selected, String paragraph, int chapterIndex) {
+    if (!mounted) return;
+    setState(() {
+      _selectedText = selected;
+      _selectedParagraph = paragraph;
+      _selectedChapterIndex = chapterIndex;
+      _selectionActive = selected.isNotEmpty;
+    });
+  }
+
+  Future<void> _showFirstAiHint() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted || prefs.getBool(_aiHintSeenKey) == true) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    if (_selectedText.isNotEmpty || _aiHintOpen) return;
+    await _showAiHint();
+    await prefs.setBool(_aiHintSeenKey, true);
+  }
+
   void _explain(String selected, String paragraph, int chapterIndex) {
     final text = selected.trim();
     switch (checkSelection(text)) {
@@ -249,7 +278,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       case SelectionCheck.tooLong:
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
-          ..showSnackBar(const SnackBar(content: Text(selectionTooLongMessage)));
+          ..showSnackBar(
+            const SnackBar(content: Text(selectionTooLongMessage)),
+          );
         return;
       case SelectionCheck.ok:
         break;
@@ -283,7 +314,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           style: AppText.bodyStrong.copyWith(color: context.colors.text),
         ),
         centerTitle: true,
-        actions: const [ThemeMenuButton(), SizedBox(width: 4)],
+        actions: [
+          _buildAiButton(),
+          const ThemeMenuButton(),
+          const SizedBox(width: 4),
+        ],
         // AC 2.3: прогресс вверху, под названием главы (как в макете)
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(38),
@@ -316,6 +351,156 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  Future<void> _showAiHint() async {
+    if (!mounted || _aiHintOpen) return;
+    final rect = _aiHintKey.currentContext?.findRenderObject();
+    if (rect is! RenderBox || !rect.attached) return;
+    final anchor = rect.localToGlobal(rect.size.center(Offset.zero));
+    _aiHintOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.transparent,
+        builder: (dialogContext) {
+          final colors = dialogContext.colors;
+          return SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final width = (constraints.maxWidth - 32)
+                    .clamp(0.0, 320.0)
+                    .toDouble();
+                final right = (constraints.maxWidth - anchor.dx - width / 2)
+                    .clamp(
+                      16.0,
+                      (constraints.maxWidth - width - 16).clamp(
+                        16.0,
+                        double.infinity,
+                      ),
+                    )
+                    .toDouble();
+                return Stack(
+                  children: [
+                    Positioned(
+                      top: kToolbarHeight + 28,
+                      right: right,
+                      width: width,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight:
+                              (constraints.maxHeight - kToolbarHeight - 44)
+                                  .clamp(0.0, double.infinity)
+                                  .toDouble(),
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Material(
+                                color: colors.highlight,
+                                elevation: 4,
+                                borderRadius: BorderRadius.circular(20),
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    8,
+                                    12,
+                                    12,
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.auto_awesome,
+                                            color: colors.accentStrong,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Объяснение с AI',
+                                              style: AppText.bodyStrong
+                                                  .copyWith(color: colors.text),
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Закрыть',
+                                            onPressed: () =>
+                                                Navigator.of(dialogContext)
+                                                    .pop(),
+                                            icon: Icon(
+                                              Icons.close,
+                                              color: colors.textSecondary,
+                                              size: 20,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Text(
+                                        _aiHint,
+                                        style: Theme.of(dialogContext)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(color: colors.text),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Align(
+                                        alignment: Alignment.centerRight,
+                                        child: FilledButton(
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor:
+                                                colors.accentStrong,
+                                            foregroundColor: colors.onAccent,
+                                          ),
+                                          onPressed: () =>
+                                              Navigator.of(dialogContext).pop(),
+                                          child: const Text('Понятно'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          );
+        },
+      );
+    } finally {
+      _aiHintOpen = false;
+    }
+  }
+
+  Widget _buildAiButton() {
+    final hasSelection = _selectedText.isNotEmpty;
+    final colors = context.colors;
+    return IconButton(
+      key: _aiHintKey,
+      style: IconButton.styleFrom(
+        backgroundColor: hasSelection ? colors.accentStrong : null,
+        foregroundColor: hasSelection ? colors.onAccent : colors.accentStrong,
+      ),
+      icon: const Icon(Icons.auto_awesome, semanticLabel: 'Объяснить с AI'),
+      onPressed: () {
+        if (_selectedText.isEmpty) {
+          unawaited(_showAiHint());
+          return;
+        }
+        _explain(_selectedText, _selectedParagraph, _selectedChapterIndex);
+      },
+    );
+  }
+
   Widget _buildReader(_ReaderData data) {
     // Текст не должен заходить под системную полоску жестов внизу экрана:
     // SafeArea уменьшает высоту области, и страницы пересчитываются под неё
@@ -336,6 +521,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                     if (mounted) setState(() {});
                   });
                 }
+                if (!_aiHintScheduled && _pages.isNotEmpty) {
+                  _aiHintScheduled = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) unawaited(_showFirstAiHint());
+                  });
+                }
                 if (_pages.isEmpty) {
                   return const Center(child: Text('В книге не найден текст'));
                 }
@@ -348,8 +539,13 @@ class _ReaderScreenState extends State<ReaderScreen>
                     controller: _pageController,
                     itemCount: _pages.length,
                     onPageChanged: (page) {
-                      setState(() => _currentPage = page);
-                      _selectionActive = false;
+                      setState(() {
+                        _currentPage = page;
+                        _selectionActive = false;
+                        _selectedText = '';
+                        _selectedParagraph = '';
+                        _selectedChapterIndex = 0;
+                      });
                       _saveProgress();
                     },
                     itemBuilder: (context, index) =>
@@ -385,9 +581,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                   return SelectableParagraph(
                     text: paragraph.substring(f.start, f.end),
                     style: style,
-                    onSelectionActive: (active) => _selectionActive = active,
-                    onExplain: (selected) =>
-                        _explain(selected, paragraph, page.chapterIndex),
+                    onSelectionChanged: (selected) => _updateSelection(
+                      selected,
+                      paragraph,
+                      page.chapterIndex,
+                    ),
                   );
                 },
               ),
