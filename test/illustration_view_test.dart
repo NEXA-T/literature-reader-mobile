@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -164,7 +165,7 @@ void main() {
     await tester.pumpWidget(_app((imagePrompt) async {
       calls++;
       return calls == 1
-          ? NetworkImage('https://example.ngrok-free.app/static/'
+          ? CachedNetworkImageProvider('https://example.ngrok-free.app/static/'
               'generated_images/img_1.svg')
           : _pixel;
     }));
