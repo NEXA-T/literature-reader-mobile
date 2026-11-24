@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
@@ -69,7 +70,7 @@ class _IllustrationViewState extends State<IllustrationView> {
       if (!mounted || attempt != _attempt) return;
       // Не успев за отведённое время, бэкенд отвечает ссылкой на SVG-заглушку,
       // а Flutter SVG не рисует. Сразу показываем «Повторить генерацию».
-      if (image is NetworkImage &&
+      if (image is CachedNetworkImageProvider &&
           Uri.tryParse(image.url)?.path.toLowerCase().endsWith('.svg') ==
               true) {
         throw StateError('сервер вернул SVG-заглушку: ${image.url}');
